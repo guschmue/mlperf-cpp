@@ -24,6 +24,7 @@ include(cxxopts)
 set (ORT_ROOT "c:/src/onnxruntime")
 set (ORT_LIB "${ORT_ROOT}/build/Windows/RelWithDebInfo/RelWithDebInfo")
 link_directories(${ORT_LIB})
+message(STATUS "Using ORT from: ${ORT_ROOT}, ${ORT_LIB}")
 
 # Set C++14 as standard for the whole project
 set(CMAKE_CXX_STANDARD 17)
@@ -41,6 +42,11 @@ endif()
 
 
 set(REPO_ROOT ${PROJECT_SOURCE_DIR})
+
+file(GLOB ORT_LIBS
+  "${ORT_LIB}/onnxruntime.*"
+)
+file(COPY ${ORT_LIBS} DESTINATION  ${PROJECT_BINARY_DIR})
 
 find_package(Threads)
 
