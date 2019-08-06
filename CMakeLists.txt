@@ -47,6 +47,7 @@ set(REPO_ROOT ${PROJECT_SOURCE_DIR})
 
 file(GLOB ORT_LIBS
   "${ORT_LIB}/onnxruntime.*"
+  "${ORT_LIB}/libonnxruntime.*"  
 )
 file(COPY ${ORT_LIBS} DESTINATION  ${CMAKE_CURRENT_BINARY_DIR})
 

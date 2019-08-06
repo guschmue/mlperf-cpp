@@ -27,14 +27,12 @@ set -x
 
 function one_run {
     ./mlperf_bench $* --scenario SingleStream 
-    #./mlperf_bench $* --scenario SingleStream --accuracy
-    #./mlperf_bench $* --scenario MultiStream
-    #./mlperf_bench $* --scenario Server
-    #./mlperf_bench $* --scenario Offline
+    ./mlperf_bench $* --scenario MultiStream
+    ./mlperf_bench $* --scenario Server
+    ./mlperf_bench $* --scenario Offline
 }
 
 one_run --model $MODEL_DIR/resnet50_v1.onnx --datadir $DATA_ROOT/imagenet/NCHW --profile resnet50 --qps 20 $gopt
-
 one_run --model $MODEL_DIR/mobilenet_v1_1.0_224.onnx --datadir $DATA_ROOT/imagenet_mobilenet/NCHW --profile mobilenet --qps 20 $gopt
 
 #one_run --model $MODEL_DIR/ssd_mobilenet_v1_coco_2018_01_28.onnx --datadir $DATA_ROOT/xx --profile ssd-mobilenet --qps 20 $gopt

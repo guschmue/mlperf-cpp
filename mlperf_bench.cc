@@ -81,11 +81,17 @@ std::map<std::string, post_processor_t> post_processors = {
     {"SoftMax", PostProcess_Softmax},
 };
 
-class QuerySampleLibrary : public mlperf::QuerySampleLibrary
+class QuerySampleLibrary : public mlperf::QuerySampleLibrary {
+public:
+    virtual ptensor_t GetItem(size_t idx) = 0;
+};
+
+class Qsl : public QuerySampleLibrary
 {
 public:
-    QuerySampleLibrary(Backend *be)
+    Qsl(Backend *be, std::string path, size_t count)
     {
+        FromDir(path, count);
     }
 
     const std::string &Name() const override { return name_; }
@@ -100,7 +106,6 @@ public:
         {
             LoadItem(s);
         }
-        std::cout << "loaded.\n";
     }
 
     void UnloadSamplesFromRam(
@@ -109,6 +114,12 @@ public:
         loaded_.clear();
     }
 
+    ptensor_t GetItem(size_t idx) override
+    { 
+        return loaded_[idx]; 
+    };
+
+private:
     int FromDir(std::string path, size_t count)
     {
         files_.clear();
@@ -138,16 +149,60 @@ public:
             shapes.push_back(i);
         }
         loaded_[idx] = std::make_tuple(shapes, data);
+
         return 0;
     }
 
-    ptensor_t GetItem(size_t idx) { return loaded_[idx]; };
-
-private:
     std::string name_{"QSL"};
     std::vector<std::string> files_;
     std::map<size_t, ptensor_t> loaded_;
 };
+
+
+class FakeQsl : public QuerySampleLibrary
+{
+public:
+    FakeQsl(Backend *be, std::string dataset)
+    {
+        // for now its all imagenet
+        std::vector<int64_t> shape = { 1, 3, 224, 224 };
+        size_ = 1;
+        shape_ = shape;
+        for (auto i : shape) {
+            size_ *= i;
+        }
+        std::vector<float> data;
+        for (int i=0; i < size_; i++) {
+            data.push_back((float)(i & 255));
+        }
+        template_ = std::make_tuple(shape_, data);
+    }
+
+    const std::string &Name() const override { return name_; }
+
+    size_t TotalSampleCount() override { return count_; }
+
+    size_t PerformanceSampleCount() override { return count_; }
+
+    void LoadSamplesToRam(const std::vector<mlperf::QuerySampleIndex> &samples) override
+    {
+    }
+
+    void UnloadSamplesFromRam(
+        const std::vector<mlperf::QuerySampleIndex> &samples) override
+    {
+    }
+
+    ptensor_t GetItem(size_t idx) { return template_; };
+
+private:
+    std::string name_{ "FakeQSL" };
+    const size_t count_ = 500;
+    size_t size_;
+    std::vector<int64_t> shape_;
+    ptensor_t template_;
+};
+
 
 class SystemUnderTest : public mlperf::SystemUnderTest
 {
@@ -228,7 +283,8 @@ protected:
 class SystemUnderTestPool : public SystemUnderTest
 {
 public:
-    SystemUnderTestPool(QuerySampleLibrary *qsl, Backend *be, post_processor_t post_proc, int threads, int max_batchsize) : SystemUnderTest(qsl, be, post_proc, threads, max_batchsize)
+    SystemUnderTestPool(QuerySampleLibrary *qsl, Backend *be, post_processor_t post_proc, int threads, int max_batchsize) :
+        SystemUnderTest(qsl, be, post_proc, threads, max_batchsize)
     {
         samples_.reserve(kReserveSampleSize);
         next_poll_time_ = std::chrono::high_resolution_clock::now() + poll_period_;
@@ -300,7 +356,6 @@ protected:
     std::condition_variable cv_;
     bool keep_workers_alive_ = true;
     std::vector<std::thread> thread_pool_;
-
     std::vector<mlperf::QuerySample> samples_;
 };
 
@@ -318,29 +373,38 @@ void run(std::string model,
     mlperf::LogSettings log_settings;
     log_settings.log_output.copy_summary_to_stdout = true;
 
-    QuerySampleLibrary qsl(&be);
-    qsl.FromDir(datadir, count);
+    QuerySampleLibrary *qsl;
+    if (!datadir.empty())
+    {        
+        qsl = new Qsl(&be, datadir, count);
+    }
+    else
+    {
+        qsl = new FakeQsl(&be, profile["dataset"]);
+    }
 
     // warmup
-    qsl.LoadItem(0);
-    ptensor_t q = qsl.GetItem(0);
+    qsl->LoadSamplesToRam({ 0 });
+    ptensor_t q = qsl->GetItem(0);
     for (int i = 0; i < 10; i++)
     {
         std::vector<Ort::Value> results = be.Run(&q, 1);
     }
+
+    std::cout << "data loaded.\n";
 
     post_processor_t post_proc = post_processors[profile["post_process"]];
 
     if (settings.scenario == mlperf::TestScenario::SingleStream ||
         settings.scenario == mlperf::TestScenario::MultiStream)
     {
-        SystemUnderTest sut(&qsl, &be, post_proc, threads, max_batchsize);
-        mlperf::StartTest(&sut, &qsl, settings, log_settings);
+        SystemUnderTest sut(qsl, &be, post_proc, threads, max_batchsize);
+        mlperf::StartTest(&sut, qsl, settings, log_settings);
     }
     else
     {
-        SystemUnderTestPool sut(&qsl, &be, post_proc, threads, max_batchsize);
-        mlperf::StartTest(&sut, &qsl, settings, log_settings);
+        SystemUnderTestPool sut(qsl, &be, post_proc, threads, max_batchsize);
+        mlperf::StartTest(&sut, qsl, settings, log_settings);
     }
 }
 
@@ -363,7 +427,7 @@ std::map<std::string, std::map<std::string, std::string>> profiles = {
         {"post_process", "ArgMax"},
     }},
     {"mobilenet", {
-        {"dataset", "imagenet"},
+        {"dataset", "imagenet_mobilenet"},
         {"queries-single", "1024"},
         {"queries-multi", "24576"},
         {"queries-server", "270336"},
@@ -428,8 +492,7 @@ int main(int argc, char *argv[])
         }
         if (result.count("datadir") == 0)
         {
-            std::cout << "specify datadir with --datadir" << std::endl;
-            exit(1);
+            std::cout << "no datadir given - using fake data" << std::endl;
         }
 
         std::map<std::string, std::string> profile = profiles[result["profile"].as<std::string>()];
