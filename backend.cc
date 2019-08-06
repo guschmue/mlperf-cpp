@@ -55,14 +55,6 @@ std::vector<Ort::Value> Backend::Run(
         output_names_.data(), output_names_.size());
 
     return results;
-#if 0
-    Ort::Value& r = results[0];
-    auto type_info = r.GetTensorTypeAndShapeInfo();
-    size_t total_len = type_info.GetElementCount();
-    float* p = r.GetTensorMutableData<float>();
-    auto ret_val = std::make_tuple(type_info.GetShape(), std::vector<float>(p, p+total_len));
-    return ret_val;
-#endif
 }
 
 }
