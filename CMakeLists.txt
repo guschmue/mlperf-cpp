@@ -19,10 +19,12 @@ mark_as_advanced(DOWNLOAD_LOCATION)
 # External dependencies
 set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake/external)
 
-include(cxxopts)
-
-set (ORT_ROOT "c:/src/onnxruntime")
-set (ORT_LIB "${ORT_ROOT}/build/Windows/RelWithDebInfo/RelWithDebInfo")
+if (NOT ORT_ROOT)
+  message(FATAL_ERROR " -- ORT_ROOT not set (ie -DORT_ROOT=c:/src/onnxruntime)")
+endif()
+if (NOT ORT_LIB)
+  message(FATAL_ERROR " -- ORT_LIB not set (ie -DORT_LIB=c:/src/onnxruntime/build/Windows/RelWithDebInfo/RelWithDebInfo)")
+endif()
 link_directories(${ORT_LIB})
 message(STATUS "Using ORT from: ${ORT_ROOT}, ${ORT_LIB}")
 
@@ -46,7 +48,7 @@ set(REPO_ROOT ${PROJECT_SOURCE_DIR})
 file(GLOB ORT_LIBS
   "${ORT_LIB}/onnxruntime.*"
 )
-file(COPY ${ORT_LIBS} DESTINATION  ${PROJECT_BINARY_DIR})
+file(COPY ${ORT_LIBS} DESTINATION  ${CMAKE_CURRENT_BINARY_DIR})
 
 find_package(Threads)
 
@@ -55,20 +57,7 @@ if (MSVC)
   SET (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc")
   #Disable 4100 globally. Too many this kind errors in protobuf
   SET (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4100")
-  check_cxx_compiler_flag(-Qspectre HAS_QSPECTRE)
-  if (HAS_QSPECTRE)
-    SET(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /Qspectre")
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Qspectre")
-  endif()
   SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} /DYNAMICBASE")
-  check_cxx_compiler_flag(-guard:cf HAS_GUARD_CF)
-  if (HAS_GUARD_CF)
-    SET(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} /guard:cf")
-    SET(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /guard:cf")
-    SET(CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO} /guard:cf")
-    SET(CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} /guard:cf")
-    SET(CMAKE_EXE_LINKER_FLAGS  "${CMAKE_EXE_LINKER_FLAGS} /guard:cf")
-  endif()
 else()
   string(APPEND CMAKE_CXX_FLAGS_RELEASE " -march=native -mtune=native")
   string(APPEND CMAKE_C_FLAGS_RELEASE " -march=native -mtune=native")
@@ -89,9 +78,13 @@ list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/external)
 get_filename_component(ROOT "${ROOT}" ABSOLUTE)
 get_filename_component(REPO_ROOT "${REPO_ROOT}" ABSOLUTE)
 
+include(cxxopts)
+
 include_directories(
   ${REPO_ROOT} 
   ${REPO_ROOT}/include
+  ${cxxopts_INCLUDE_DIRS}
+  ${ORT_ROOT}/include
 )
 
 # bounds checking behavior.
@@ -118,14 +111,13 @@ else()
   # Enable warning and enable space optimization in Linux
   string(APPEND CMAKE_CXX_FLAGS " -Wall -Wextra -ffunction-sections -fdata-sections")
   string(APPEND CMAKE_C_FLAGS " -Wall -Wextra -ffunction-sections -fdata-sections")
+  link_libraries(stdc++fs)
 endif()
-
 
 add_subdirectory(
   ../../../loadgen 
   ${PROJECT_BINARY_DIR}/mlperf_loadgen
 )
-
 
 set(EXTERNAL_DEPENDENCIES mlperf_loadgen)
 set(EXTERNAL_INCLUDES ${ORT_ROOT}/include ../../../loadgen ${cxxopts_INCLUDE_DIRS})
@@ -137,4 +129,4 @@ file(GLOB srcs
 
 add_executable(mlperf_bench ${srcs})
 target_include_directories(mlperf_bench PRIVATE ${EXTERNAL_INCLUDES})
-target_link_libraries(mlperf_bench mlperf_loadgen onnxruntime)
+target_link_libraries(mlperf_bench mlperf_loadgen onnxruntime ${CMAKE_THREAD_LIBS_INIT})

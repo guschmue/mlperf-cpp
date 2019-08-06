@@ -1,5 +1,6 @@
 
 #include <string>
+#include <algorithm>
 #include <vector>
 #include <tuple>
 #include <iostream>
@@ -20,8 +21,13 @@ Backend::Backend() {
 
 Status Backend::LoadModel(std::string path, std::vector<std::string> outputs) {
     const Ort::SessionOptions opt({ nullptr });
+ 
+#ifdef _WIN32
     std::wstring widestr = std::wstring(path.begin(), path.end());
     session_ = new Ort::Session(env, widestr.c_str(), opt);
+#else
+    session_ = new Ort::Session(env, path.c_str(), opt);
+#endif
     for (size_t i = 0; i < this->session_->GetInputCount(); i++) {
         input_names_.push_back(session_->GetInputName(i, allocator));
     }

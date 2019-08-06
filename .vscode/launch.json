@@ -1,0 +1,31 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "g++ build and debug active file",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/mlperf_bench",
+            "args": ["--model", "/home/gs/resnet_for_mlperf/opset10/mobilenet_v1_1.0_224.onnx", "--datadir",
+                "/home/gs/inference/v0.5/classification_and_detection/mlperf-cpp/build/../../preprocessed/imagenet_mobilenet/NCHW", 
+                "--profile", "mobilenet", "--qps", "20", "--max-batchsize", "32", "--time",
+                "30", "--count", "500", "--scenario", "SingleStream"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "miDebuggerPath": "/usr/bin/gdb"
+        }
+    ]
+}
