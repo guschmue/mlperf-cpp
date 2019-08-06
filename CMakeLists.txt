@@ -130,3 +130,4 @@ file(GLOB srcs
 add_executable(mlperf_bench ${srcs})
 target_include_directories(mlperf_bench PRIVATE ${EXTERNAL_INCLUDES})
 target_link_libraries(mlperf_bench mlperf_loadgen onnxruntime ${CMAKE_THREAD_LIBS_INIT})
+add_dependencies(mlperf_bench cxxopts)

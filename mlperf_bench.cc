@@ -349,6 +349,12 @@ std::map<std::string, std::map<std::string, std::string>> profiles = {
         {"dataset", "imagenet"},
         {"queries-single", "1024"},
         {"queries-multi", "24576"},
+        {"queries-server", "270336"},
+        {"queries-offline", "1"},
+        {"time-single", "60"},
+        {"time-multi", "60"},
+        {"time-server", "60"},
+        {"time-offline", "60"},
         {"max-latency", "0.015"},
         {"qps", "10"},
         {"backend", "onnxruntime"},
@@ -360,6 +366,12 @@ std::map<std::string, std::map<std::string, std::string>> profiles = {
         {"dataset", "imagenet"},
         {"queries-single", "1024"},
         {"queries-multi", "24576"},
+        {"queries-server", "270336"},
+        {"queries-offline", "1"},
+        {"time-single", "60"},
+        {"time-multi", "60"},
+        {"time-server", "60"},
+        {"time-offline", "60"},
         {"max-latency", "0.010"},
         {"qps", "10"},
         {"backend", "onnxruntime"},
@@ -414,44 +426,68 @@ int main(int argc, char *argv[])
             std::cout << "specify model with --model path" << std::endl;
             exit(0);
         }
+        if (result.count("datadir") == 0)
+        {
+            std::cout << "specify datadir with --datadir" << std::endl;
+            exit(1);
+        }
 
         std::map<std::string, std::string> profile = profiles[result["profile"].as<std::string>()];
+        if (profile.empty()) {
+            std::cout << "invalid profile" << std::endl;
+            exit(1);
+        }
 
         mlperf::TestSettings settings;
         settings.scenario = scenario_map[result["scenario"].as<std::string>()];
         settings.mode = mode_map[result["mode"].as<std::string>()];
         settings.server_target_qps = 2000000;
 
+        int entries_to_read = 0;
+        int count = result["count"].as<int32_t>();
+        if (settings.mode == mlperf::TestMode::PerformanceOnly)
+        {
+            if (count > 500 || count == 0) 
+            {
+                // in performance mode we use only 500 unique images
+                entries_to_read = 500;
+            }
+        }
+        if (settings.scenario == mlperf::TestScenario::SingleStream) {
+            settings.min_query_count = std::stoi(profile["queries-single"]);
+            settings.min_duration_ms = std::stoi(profile["time-single"]) * 1000;
+        }
+        if (settings.scenario == mlperf::TestScenario::MultiStream)
+        {
+            settings.min_query_count = std::stoi(profile["queries-multi"]);
+            settings.min_duration_ms = std::stoi(profile["time-multi"]) * 1000;
+            settings.multi_stream_samples_per_query = result["samples-perf-query"].as<int32_t>();
+        }
+        if (settings.scenario == mlperf::TestScenario::Server)
+        {
+            settings.min_query_count = std::stoi(profile["queries-server"]);
+            settings.min_duration_ms = std::stoi(profile["time-server"]) * 1000;
+            settings.server_target_qps = result["qps"].as<int32_t>();
+            settings.server_target_latency_ns = result["latency"].as<int32_t>() * 1000 * 1000;
+        }
+        if (settings.scenario == mlperf::TestScenario::Offline)
+        {
+            settings.min_query_count = std::stoi(profile["queries-offline"]);
+            settings.min_duration_ms = std::stoi(profile["time-offline"]) * 1000;
+        }
+        settings.max_query_count = settings.min_query_count;
+        // settings.max_duration_ms = settings.min_duration_ms;
+        if (count > 0)
+        {
+            entries_to_read = count;
+            settings.min_query_count = count * 5;
+            settings.max_query_count = count * 5;
+        }
         int time = result["time"].as<int32_t>();
         if (time > 0)
         {
             settings.min_duration_ms = time * 1000;
             settings.max_duration_ms = time * 1000;
-        }
-
-        int entries_to_read = 0;
-        int count = result["count"].as<int32_t>();
-        if (count > 0)
-        {
-            entries_to_read = count;
-            settings.min_query_count = count;
-            settings.max_query_count = count;
-        }
-        if (settings.mode == mlperf::TestMode::PerformanceOnly)
-        {
-            if (count > 500) 
-            {
-                entries_to_read = 500;
-            }
-        }
-        if (settings.scenario == mlperf::TestScenario::MultiStream)
-        {
-            settings.multi_stream_samples_per_query = result["samples-perf-query"].as<int32_t>();
-        }
-        if (settings.scenario == mlperf::TestScenario::Server)
-        {
-            settings.server_target_qps = result["qps"].as<int32_t>();
-            settings.server_target_latency_ns = result["latency"].as<int32_t>() * 1000 * 1000;
         }
 
         run(result["model"].as<std::string>(),
@@ -478,6 +514,3 @@ int main(int argc, char *argv[])
 {
     return mlperf_bench::main(argc, argv);
 }
-
-// build on windows: cmake ..  -A x64 -G "Visual Studio 15 2017"  -DORT_ROOT=c:/src/onnxruntime  -DORT_LIB=c:/src/onnxruntime/build/Windows/RelWithDebInfo/RelWithDebInfo
-// --model w:\resnet_for_mlperf\mobilenet_v1_1.0_224.onnx --datadir w:\inference\v0.5\classification_and_detection\preprocessed\imagenet_mobilenet\NCHW --profile mobilenet
