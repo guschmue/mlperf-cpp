@@ -20,8 +20,9 @@ Backend::Backend() {
 }
 
 Status Backend::LoadModel(std::string path, std::vector<std::string> outputs) {
-    const Ort::SessionOptions opt({ nullptr });
- 
+    Ort::SessionOptions opt;
+    opt.SetGraphOptimizationLevel(3);
+
 #ifdef _WIN32
     std::wstring widestr = std::wstring(path.begin(), path.end());
     session_ = new Ort::Session(env, widestr.c_str(), opt);
