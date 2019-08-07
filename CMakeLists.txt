@@ -110,7 +110,7 @@ if (WIN32)
 else()
   add_definitions(-DPLATFORM_POSIX)
   # Enable warning and enable space optimization in Linux
-  string(APPEND CMAKE_CXX_FLAGS " -Wall -Wextra -ffunction-sections -fdata-sections")
+  string(APPEND CMAKE_CXX_FLAGS " -Wall -Wextra -ffunction-sections -fdata-sections -Wno-unused-parameter")
   string(APPEND CMAKE_C_FLAGS " -Wall -Wextra -ffunction-sections -fdata-sections")
   link_libraries(stdc++fs)
 endif()
