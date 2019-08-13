@@ -77,6 +77,20 @@ void PostProcess_Softmax(std::vector<Ort::Value> &val,
 
 void PostProcess_TF_SSDMobilenet(std::vector<Ort::Value> &val,
     std::vector<std::vector<uint8_t>> &buf) {
+    Ort::Value &num_detections = val[0];
+    Ort::Value &detection_boxes = val[1];
+    Ort::Value &detection_scores = val[2];
+    Ort::Value &detection_classes = val[3];
+
+    auto type_info = num_detections.GetTensorTypeAndShapeInfo();
+    auto shape = type_info.GetShape();
+    float *p = num_detections.GetTensorMutableData<float>();
+
+    for (int batch = 0; batch < shape[0]; batch++) {
+        float result = 0;
+        std::vector<uint8_t> ele((uint8_t *)&result, (uint8_t *)(&result + 1));
+        buf.push_back(ele);
+    }
 }
 
 std::map<std::string, post_processor_t> post_processors = {
@@ -247,6 +261,10 @@ class SystemUnderTest : public mlperf::SystemUnderTest {
             results = be_->Run(&q, 1);
         }
         else {
+            // FIXME: this is not very efficient. 
+            // loadgen will make the samples continues in the near future and once it does so
+            // change this code to just point into the continues data buffer. Needs changes how
+            // we load the tensors as well.
             Ort::Value& qq = qsl_->GetItem(samples[0].index);
             std::vector<int64_t> shapes;
             auto type_info = qq.GetTensorTypeAndShapeInfo();
