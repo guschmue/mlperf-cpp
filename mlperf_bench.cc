@@ -49,7 +49,7 @@ void PostProcess_Argmax(std::vector<Ort::Value> &val,
     auto shape = type_info.GetShape();
     int64_t *p = r.GetTensorMutableData<int64_t>();
     for (int batch = 0; batch < shape[0]; batch++) {
-        float argmax = (float)*p++;
+        float argmax = (float)*p++ - 1;
         std::vector<uint8_t> ele((uint8_t *)&argmax, (uint8_t *)(&argmax + 1));
         buf.push_back(ele);
     }
@@ -139,6 +139,9 @@ class Qsl : public QuerySampleLibrary {
    private:
     int FromDir(std::string path, size_t count) {
         files_.clear();
+#if 0
+        // recurse through the directory. We are not using this because 
+        // it is hard to guarante the same order that the accuracy script would use.
         for (auto &p : fs::recursive_directory_iterator(path)) {
             if (fs::is_regular_file(p.path())) {
                 std::string pp(p.path().string());
@@ -146,7 +149,16 @@ class Qsl : public QuerySampleLibrary {
                 if (count > 0 && files_.size() > count) break;
             }
         }
-        std::sort(files_.begin(), files_.end());
+        //std::sort(files_.begin(), files_.end());
+#endif
+        std::ifstream infile(path);
+        std::string line;
+        std::string basepath = path.substr(0, path.find_last_of("/\\"));
+        while (std::getline(infile, line)) {
+            std::string file_name = line.substr(0, line.find_last_of(" \t")) + ".npy";
+            files_.push_back(basepath + "/" + file_name);
+            if (count > 0 && files_.size() > count) break;
+        }
         return 0;
     }
 
@@ -532,7 +544,7 @@ int main(int argc, char *argv[]) {
         cxxopts::value<std::string>()->default_value("SingleStream"))(
         "mode", "mode (PerformanceOnly,AccuracyOnly,SubmissionRun)",
         cxxopts::value<std::string>()->default_value("PerformanceOnly"))(
-        "datadir", "datadir to load",
+        "datadir", "data file to load",
         cxxopts::value<std::string>()->default_value(""))(
         "profile", "profile to load",
         cxxopts::value<std::string>()->default_value("resnet50"))(

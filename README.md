@@ -36,7 +36,7 @@ Usage:
       --model arg               model to load (default: )
       --scenario arg            scenario to load (SingleStream,MultiStream,Server,Offline)
       --mode arg                mode (PerformanceOnly,AccuracyOnly,SubmissionRun)
-      --datadir arg             datadir to load (default: )
+      --datadir arg             datalist to load (ie. imagenet2012/val_map.txt) (default: )
       --profile arg             profile to load (default: resnet50)
       --time arg                time to run (default: 0)
       --threads arg             threads (default: 2)
@@ -49,7 +49,7 @@ Usage:
 
 Some common examples:
 ```
-mlperf_bench --profile mobilenet --model resnet_for_mlperf/opset10/mobilenet_v1_1.0_224.onnx --datadir preprocessed/imagenet_mobilenet/NCHW --count 500 --scenario SingleStream
+mlperf_bench --profile mobilenet --model resnet_for_mlperf/opset10/mobilenet_v1_1.0_224.onnx --datadir preprocessed/imagenet_mobilenet/NCHW/val_map.txt --count 500 --scenario SingleStream
 
 * datadir contains the preprocessed images by inference/v0.5/classification_and_detection/python
 ```
