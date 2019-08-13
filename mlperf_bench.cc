@@ -12,14 +12,8 @@
 #include <thread>
 #include <tuple>
 #include <vector>
-#if defined(_WIN32)
-#include <filesystem>
-// namespace fs = std::filesystem;
-namespace fs = std::experimental::filesystem;
-#else
 #include <experimental/filesystem>
 namespace fs = std::experimental::filesystem;
-#endif
 #include "cxxopts.hpp"
 
 #include "backend.h"
@@ -31,6 +25,19 @@ namespace fs = std::experimental::filesystem;
 #include "test_settings.h"
 
 namespace mlperf_bench {
+
+void Dbg(Ort::Value& t) {
+    auto type_info = t.GetTensorTypeAndShapeInfo();
+    auto shape = type_info.GetShape();
+    float* p = t.GetTensorMutableData<float>();
+    std::cout << "shape: [";
+    for (auto s : shape) {
+        std::cout << s << ",";
+    }
+    std::cout << "], type: " << type_info.GetElementType() << ", items: " << type_info.GetElementCount() << " ";
+    std::cout << *(p + 0) << " " << *(p + 1) << " ";
+    std::cout << "\n";
+}
 
 typedef void (*post_processor_t)(std::vector<Ort::Value> &,
                                  std::vector<std::vector<uint8_t>> &);
@@ -68,18 +75,29 @@ void PostProcess_Softmax(std::vector<Ort::Value> &val,
     }
 }
 
+void PostProcess_TF_SSDMobilenet(std::vector<Ort::Value> &val,
+    std::vector<std::vector<uint8_t>> &buf) {
+}
+
 std::map<std::string, post_processor_t> post_processors = {
-    {"ArgMax", PostProcess_Argmax}, {"SoftMax", PostProcess_Softmax},
+    {"ArgMax", PostProcess_Argmax}, 
+    {"SoftMax", PostProcess_Softmax},
+    {"TF_SSDMobilenet", PostProcess_TF_SSDMobilenet},
 };
+
 
 class QuerySampleLibrary : public mlperf::QuerySampleLibrary {
    public:
-    virtual ptensor_t GetItem(size_t idx) = 0;
+    virtual Ort::Value& GetItem(size_t idx) = 0;
 };
 
+template <class T>
 class Qsl : public QuerySampleLibrary {
    public:
-    Qsl(Backend *be, std::string path, size_t count) { FromDir(path, count); }
+    Qsl(Backend *be, std::string path, size_t count) { 
+        be_ = be;
+        FromDir(path, count); 
+    }
 
     const std::string &Name() const override { return name_; }
 
@@ -89,6 +107,8 @@ class Qsl : public QuerySampleLibrary {
 
     void LoadSamplesToRam(
         const std::vector<mlperf::QuerySampleIndex> &samples) override {
+        loaded_.clear();
+        dummy_.clear();
         for (auto s : samples) {
             LoadItem(s);
         }
@@ -97,9 +117,10 @@ class Qsl : public QuerySampleLibrary {
     void UnloadSamplesFromRam(
         const std::vector<mlperf::QuerySampleIndex> &samples) override {
         loaded_.clear();
+        dummy_.clear();
     }
 
-    ptensor_t GetItem(size_t idx) override { return loaded_[idx]; };
+    Ort::Value& GetItem(size_t idx) override { return loaded_.at(idx); };
 
    private:
     int FromDir(std::string path, size_t count) {
@@ -117,38 +138,55 @@ class Qsl : public QuerySampleLibrary {
 
     int LoadItem(size_t idx) {
         std::vector<unsigned long> shape;
-        std::vector<float> data;
-        npy::LoadArrayFromNumpy<float>(files_[idx], shape, data);
+        std::vector<T> data;
+        npy::LoadArrayFromNumpy<T>(files_[idx], shape, data);
         std::vector<int64_t> shapes;
         shapes.push_back(1);
         for (auto i : shape) {
             shapes.push_back(i);
         }
-        loaded_[idx] = std::make_tuple(shapes, data);
-
+        loaded_.emplace(idx, be_->GetTensor<T>(shapes, data));
+        dummy_.emplace_back(std::move(data));
         return 0;
     }
 
     const std::string name_{"QSL"};
     std::vector<std::string> files_;
-    std::map<size_t, ptensor_t> loaded_;
+    std::map<size_t, Ort::Value> loaded_;
+    std::vector <std::vector<T>> dummy_;
+    Backend *be_;
 };
 
+template <class T>
 class FakeQsl : public QuerySampleLibrary {
    public:
     FakeQsl(Backend *be, std::string dataset) {
         // for now its all imagenet
-        std::vector<int64_t> shape = {1, 3, 224, 224};
+        be_ = be;
+        std::vector<int64_t> shape;
+        if (dataset == "imagenet" || dataset == "imagenet_mobilenet") {
+            shape = { 1, 3, 224, 224 };
+        }
+        else if (dataset == "coco-300") {
+            // comes as NHWC
+            shape = { 1, 300, 300, 3 };
+        }
+        else if (dataset == "coco-1200") {
+            shape = { 1, 3, 1200, 1200 };
+        }
+        else {
+            // FIXME
+        }
         size_ = 1;
         shape_ = shape;
         for (auto i : shape) {
             size_ *= i;
         }
-        std::vector<float> data;
         for (int i = 0; i < size_; i++) {
-            data.push_back((float)(i & 255));
+            data_.push_back((float)(i & 255));
         }
-        template_ = std::make_tuple(shape_, data);
+        Ort::Value t = be->GetTensor<T>(shape_, data_);
+        template_ = std::move(t);
     }
 
     const std::string &Name() const override { return name_; }
@@ -163,14 +201,16 @@ class FakeQsl : public QuerySampleLibrary {
     void UnloadSamplesFromRam(
         const std::vector<mlperf::QuerySampleIndex> &samples) override {}
 
-    ptensor_t GetItem(size_t idx) { return template_; };
+    Ort::Value& GetItem(size_t idx) { return template_; };
 
    private:
     const std::string name_{"FakeQSL"};
+    std::vector<T> data_;
     const size_t count_ = 500;
     size_t size_;
     std::vector<int64_t> shape_;
-    ptensor_t template_;
+    Ort::Value template_{ nullptr };
+    Backend *be_;
 };
 
 class SystemUnderTest : public mlperf::SystemUnderTest {
@@ -183,31 +223,55 @@ class SystemUnderTest : public mlperf::SystemUnderTest {
         post_proc_ = post_proc;
         threads_ = threads;
         max_batchsize_ = max_batchsize;
-    }
-    void IssueQuery(const std::vector<mlperf::QuerySample> &samples) override {
-        IssueQueryProc(samples);
+        input_type_ = be->GetInputType(0);
     }
 
+    void IssueQuery(const std::vector<mlperf::QuerySample> &samples) override {
+        if (input_type_ == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
+            IssueQueryProc<float>(samples);
+        }
+        else if (input_type_ == ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8) {
+            IssueQueryProc<uint8_t>(samples);
+        }
+    }
+
+    template <typename T>
     void IssueQueryProc(const std::vector<mlperf::QuerySample> &samples) {
         std::vector<mlperf::QuerySampleResponse> responses;
         responses.reserve(samples.size());
         std::vector<std::vector<uint8_t>> dummy;
-        ptensor_t q;
-        bool got_one = false;
-        for (auto &s : samples) {
-            if (got_one) {
-                ptensor_t q1 = qsl_->GetItem(s.index);
-                std::get<0>(q)[0]++;
-                std::get<1>(q).insert(std::get<1>(q).end(),
-                                      std::get<1>(q1).begin(),
-                                      std::get<1>(q1).end());
-            } else {
-                q = qsl_->GetItem(s.index);
-                got_one = true;
+
+        std::vector<Ort::Value> results;
+        if (samples.size() == 1) {
+            Ort::Value& q = qsl_->GetItem(samples[0].index);
+            results = be_->Run(&q, 1);
+        }
+        else {
+            Ort::Value& qq = qsl_->GetItem(samples[0].index);
+            std::vector<int64_t> shapes;
+            auto type_info = qq.GetTensorTypeAndShapeInfo();
+            auto shape = type_info.GetShape();
+            auto elements = type_info.GetElementCount();
+            int64_t size = 1;
+            shape[0] = samples.size();
+            for (auto si : shape) {
+                size *= si;
+                shapes.push_back(si);
             }
+            std::vector<T> data(size);
+
+            size_t idx = 0;
+            for (auto &s : samples) {
+                Ort::Value& r = qsl_->GetItem(samples[0].index);
+                T *p = r.GetTensorMutableData<T>();
+                for (size_t i = 0; i < elements; i++) {
+                    data[idx++] = *p++;
+                }
+            }
+            Ort::Value q = be_->GetTensor<T>(shapes, data);
+            results = be_->Run(&q, 1);
         }
 
-        std::vector<Ort::Value> results = be_->Run(&q, 1);
         std::vector<std::vector<uint8_t>> buf;
         post_proc_(results, buf);
         size_t idx = 0;
@@ -236,6 +300,7 @@ class SystemUnderTest : public mlperf::SystemUnderTest {
     post_processor_t post_proc_;
     int max_batchsize_ = 32;
     int threads_ = 1;
+    ONNXTensorElementDataType input_type_;
 };
 
 //
@@ -293,7 +358,7 @@ class SystemUnderTestPool : public SystemUnderTest {
             lock.unlock();
 
             if (my_samples.size() > 0) {
-                IssueQueryProc(my_samples);
+                IssueQueryProc<float>(my_samples);
             }
             lock.lock();
             my_samples.clear();
@@ -322,21 +387,39 @@ void run(std::string model, std::string datadir,
     mlperf::LogSettings log_settings;
     log_settings.log_output.copy_summary_to_stdout = true;
 
+    ONNXTensorElementDataType input_type = be.GetInputType(0);
+
     QuerySampleLibrary *qsl;
     if (!datadir.empty()) {
-        qsl = new Qsl(&be, datadir, count);
+        if (input_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
+            qsl = new Qsl<float>(&be, datadir, count);
+        }
+        else if (input_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8) {
+            qsl = new Qsl<uint8_t>(&be, datadir, count);
+        }
+        else {
+            // FIXME
+        }
     } else {
-        qsl = new FakeQsl(&be, profile["dataset"]);
+        if (input_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
+            qsl = new FakeQsl<float>(&be, profile["dataset"]);
+        }
+        else if (input_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8) {
+            qsl = new FakeQsl<uint8_t>(&be, profile["dataset"]);
+        }
+        else {
+            // FIXME
+        }
     }
 
     // warmup
     qsl->LoadSamplesToRam({0});
-    ptensor_t q = qsl->GetItem(0);
     for (int i = 0; i < 10; i++) {
+        Ort::Value& q = qsl->GetItem(0);
         std::vector<Ort::Value> results = be.Run(&q, 1);
     }
 
-    std::cout << "data loaded.\n";
+    std::cout << qsl->PerformanceSampleCount() << " items loaded.\n";
 
     post_processor_t post_proc = post_processors[profile["post_process"]];
 
@@ -387,11 +470,31 @@ std::map<std::string, std::map<std::string, std::string>> profiles = {
          {"outputs", "MobilenetV1/Predictions/Reshape_1:0"},
          {"post_process", "SoftMax"},
      }},
+    {"ssd-mobilenet",
+     {
+         {"dataset", "coco-300"},
+         {"queries-single", "1024"},
+         {"queries-multi", "24576"},
+         {"queries-server", "270336"},
+         {"queries-offline", "1"},
+         {"time-single", "60"},
+         {"time-multi", "60"},
+         {"time-server", "60"},
+         {"time-offline", "60"},
+         {"max-latency", "0.010"},
+         {"qps", "10"},
+         {"backend", "onnxruntime"},
+         {"inputs", "image_tensor:0"},
+         {"outputs", "num_detections:0,detection_boxes:0,detection_scores:0,detection_classes:0"},
+         {"post_process", "TF_SSDMobilenet"},
+     }},
 };
 
 std::map<std::string, mlperf::TestScenario> scenario_map = {
     {"SingleStream", mlperf::TestScenario::SingleStream},
     {"MultiStream", mlperf::TestScenario::MultiStream},
+    {"Single", mlperf::TestScenario::SingleStream},
+    {"Multi", mlperf::TestScenario::MultiStream},
     {"Server", mlperf::TestScenario::Server},
     {"Offline", mlperf::TestScenario::Offline},
 };
@@ -512,4 +615,6 @@ int main(int argc, char *argv[]) {
 
 // out of namespace
 
-int main(int argc, char *argv[]) { return mlperf_bench::main(argc, argv); }
+int main(int argc, char *argv[]) { 
+    return mlperf_bench::main(argc, argv); 
+}
