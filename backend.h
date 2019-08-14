@@ -19,8 +19,11 @@ class Backend {
             allocator_info_, data.data(), data.size(), shapes.data(), shapes.size());
     };
     ONNXTensorElementDataType GetInputType(size_t idx) { return input_type_[idx]; };
+    Ort::SessionOptions& GetOpt() { return opt_; };
+
    private:
     Ort::Session* session_;
+    Ort::SessionOptions opt_;
     std::vector<std::vector<int64_t>> output_shapes_;
     std::vector<char*> output_names_;
     std::vector<char*> input_names_;

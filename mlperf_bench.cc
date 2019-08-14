@@ -409,9 +409,19 @@ class SystemUnderTestPool : public SystemUnderTest {
 
 void run(std::string model, std::string datadir,
          std::map<std::string, std::string> profile,
-         mlperf::TestSettings &settings, int count, int threads,
-         int max_batchsize) {
+         mlperf::TestSettings &settings, int count, int threads, int max_batchsize,
+         int ort_seq, int ort_threads, int ort_level) {
     Backend be;
+    be.GetOpt().SetGraphOptimizationLevel(ort_level);
+    if (ort_seq == 1) {
+        be.GetOpt().EnableSequentialExecution();
+    }
+    if (ort_seq == 2) {
+        be.GetOpt().DisableSequentialExecution();
+    }
+    if (ort_threads > 0) {
+        be.GetOpt().SetThreadPoolSize(ort_threads);
+    }
     be.LoadModel(model, {});
 
     mlperf::LogSettings log_settings;
@@ -537,28 +547,38 @@ std::map<std::string, mlperf::TestMode> mode_map = {
 
 int main(int argc, char *argv[]) {
     cxxopts::Options options("mlperf_bench", "mlperf_bench");
-    options.add_options()("model", "model to load",
-                          cxxopts::value<std::string>()->default_value(""))(
-        "scenario",
-        "scenario to load (SingleStream,MultiStream,Server,Offline)",
-        cxxopts::value<std::string>()->default_value("SingleStream"))(
-        "mode", "mode (PerformanceOnly,AccuracyOnly,SubmissionRun)",
-        cxxopts::value<std::string>()->default_value("PerformanceOnly"))(
-        "datadir", "data file to load",
-        cxxopts::value<std::string>()->default_value(""))(
-        "profile", "profile to load",
-        cxxopts::value<std::string>()->default_value("resnet50"))(
-        "time", "time to run", cxxopts::value<int32_t>()->default_value("0"))(
-        "threads", "threads", cxxopts::value<int32_t>()->default_value("2"))(
-        "max-batchsize", "max-batchsize",
-        cxxopts::value<int32_t>()->default_value("32"))(
-        "qps", "qps", cxxopts::value<int32_t>()->default_value("20"))(
-        "latency", "latency (ms)",
-        cxxopts::value<int32_t>()->default_value("15"))(
-        "samples-perf-query", "samples-per-query",
-        cxxopts::value<int32_t>()->default_value("2"))(
-        "count", "count", cxxopts::value<int32_t>()->default_value("0"))(
-        "help", "help");
+    options.add_options()
+        ("model", "model to load", 
+            cxxopts::value<std::string>()->default_value(""))
+        ("scenario", "scenario to load (SingleStream,MultiStream,Server,Offline)", 
+            cxxopts::value<std::string>()->default_value("SingleStream"))
+        ("mode", "mode (PerformanceOnly,AccuracyOnly,SubmissionRun)",
+            cxxopts::value<std::string>()->default_value("PerformanceOnly"))
+        ("datadir", "data file to load",
+            cxxopts::value<std::string>()->default_value(""))
+        ("profile", "profile to load",
+            cxxopts::value<std::string>()->default_value("resnet50"))
+        ("time", "time to run", 
+            cxxopts::value<int32_t>()->default_value("0"))
+        ("threads", "threads", 
+            cxxopts::value<int32_t>()->default_value("2"))
+        ("max-batchsize", "max-batchsize",
+            cxxopts::value<int32_t>()->default_value("32"))
+        ("qps", "qps", 
+            cxxopts::value<int32_t>()->default_value("20"))
+        ("latency", "latency (ms)",
+            cxxopts::value<int32_t>()->default_value("15"))
+        ("samples-perf-query", "samples-per-query",
+            cxxopts::value<int32_t>()->default_value("2"))
+        ("count", "count", 
+            cxxopts::value<int32_t>()->default_value("0"))
+        ("ort-level", "onnxruntime opt level",
+            cxxopts::value<int32_t>()->default_value("3"))
+        ("ort-seq", "onnxruntime use sequential executor",
+            cxxopts::value<int32_t>()->default_value("0"))
+        ("ort-threads", "onnxruntime thread count",
+            cxxopts::value<int32_t>()->default_value("0"))
+        ("help", "help");
 
     try {
         auto result = options.parse(argc, argv);
@@ -630,10 +650,15 @@ int main(int argc, char *argv[]) {
             settings.max_duration_ms = time * 1000;
         }
 
+        int ort_seq = result["ort-seq"].as<int32_t>();
+        int ort_threads = result["ort-threads"].as<int32_t>();
+        int ort_level = result["ort-level"].as<int32_t>();
+
         run(result["model"].as<std::string>(),
             result["datadir"].as<std::string>(), profile, settings,
             entries_to_read, result["threads"].as<int32_t>(),
-            result["max-batchsize"].as<int32_t>());
+            result["max-batchsize"].as<int32_t>(),
+            ort_seq, ort_threads, ort_level);
     } catch (const cxxopts::OptionException &e) {
         std::cout << "error parsing options: " << e.what() << std::endl;
         exit(1);
