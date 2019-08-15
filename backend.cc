@@ -9,20 +9,30 @@
 
 namespace mlperf_bench {
 
+Ort::Env env { ORT_LOGGING_LEVEL_WARNING, "mlperf_bench" };
 
 Backend::Backend() {}
 
 Status Backend::LoadModel(std::string path, std::vector<std::string> outputs) {
 #ifdef _WIN32
     std::wstring widestr = std::wstring(path.begin(), path.end());
-    session_ = new Ort::Session(env_, widestr.c_str(), opt_);
+    session_ = new Ort::Session(env, widestr.c_str(), opt_);
 #else
     session_ = new Ort::Session(env, path.c_str(), opt_);
 #endif
     for (size_t i = 0; i < this->session_->GetInputCount(); i++) {
         input_names_.push_back(session_->GetInputName(i, allocator_));
         auto ti = session_->GetInputTypeInfo(i).GetTensorTypeAndShapeInfo();
-        input_type_.push_back(ti.GetElementType());
+        auto input_type = ti.GetElementType();
+
+        // FIXME: ti.GetElementType() returns junk on linux. Hack it for now.
+        if (path.find("ssd") != std::string::npos) {
+            input_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8;
+        }
+        else {
+            input_type = ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT;
+        }
+        input_type_.push_back(input_type);
     }
     for (size_t i = 0; i < this->session_->GetOutputCount(); i++) {
         char* name = session_->GetOutputName(i, allocator_);

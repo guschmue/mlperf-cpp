@@ -388,7 +388,12 @@ class SystemUnderTestPool : public SystemUnderTest {
             lock.unlock();
 
             if (my_samples.size() > 0) {
-                IssueQueryProc<float>(my_samples);
+                if (input_type_ == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
+                    IssueQueryProc<float>(my_samples);
+                }
+                else if (input_type_ == ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8) {
+                    IssueQueryProc<uint8_t>(my_samples);
+                }
             }
             lock.lock();
             my_samples.clear();
@@ -429,7 +434,7 @@ void run(std::string model, std::string datadir,
 
     ONNXTensorElementDataType input_type = be.GetInputType(0);
 
-    QuerySampleLibrary *qsl;
+    QuerySampleLibrary *qsl = NULL;
     if (!datadir.empty()) {
         if (input_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
             qsl = new Qsl<float>(&be, datadir, count);

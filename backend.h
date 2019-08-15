@@ -28,7 +28,6 @@ class Backend {
     std::vector<char*> output_names_;
     std::vector<char*> input_names_;
     std::vector<ONNXTensorElementDataType> input_type_;
-    Ort::Env env_ { ORT_LOGGING_LEVEL_WARNING, "mlperf_bench" };
     const Ort::RunOptions run_options_; //(nullptr);
     Ort::AllocatorInfo allocator_info_ =
         Ort::AllocatorInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
