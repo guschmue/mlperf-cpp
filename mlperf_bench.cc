@@ -415,9 +415,9 @@ class SystemUnderTestPool : public SystemUnderTest {
 void run(std::string model, std::string datadir,
          std::map<std::string, std::string> profile,
          mlperf::TestSettings &settings, int count, int threads, int max_batchsize,
-         int ort_seq, int ort_threads, int ort_level) {
+         int ort_seq, int ort_threads) {
     Backend be;
-    be.GetOpt().SetGraphOptimizationLevel(ort_level);
+    be.GetOpt().SetGraphOptimizationLevel(ORT_ENABLE_ALL);
     if (ort_seq == 1) {
         be.GetOpt().EnableSequentialExecution();
     }
@@ -577,8 +577,6 @@ int main(int argc, char *argv[]) {
             cxxopts::value<int32_t>()->default_value("2"))
         ("count", "count", 
             cxxopts::value<int32_t>()->default_value("0"))
-        ("ort-level", "onnxruntime opt level",
-            cxxopts::value<int32_t>()->default_value("3"))
         ("ort-seq", "onnxruntime use sequential executor",
             cxxopts::value<int32_t>()->default_value("0"))
         ("ort-threads", "onnxruntime thread count",
@@ -657,13 +655,12 @@ int main(int argc, char *argv[]) {
 
         int ort_seq = result["ort-seq"].as<int32_t>();
         int ort_threads = result["ort-threads"].as<int32_t>();
-        int ort_level = result["ort-level"].as<int32_t>();
 
         run(result["model"].as<std::string>(),
             result["datadir"].as<std::string>(), profile, settings,
             entries_to_read, result["threads"].as<int32_t>(),
             result["max-batchsize"].as<int32_t>(),
-            ort_seq, ort_threads, ort_level);
+            ort_seq, ort_threads);
     } catch (const cxxopts::OptionException &e) {
         std::cout << "error parsing options: " << e.what() << std::endl;
         exit(1);
