@@ -3,6 +3,7 @@
 #include <vector>
 #include "mlperf_bench.h"
 #include "onnxruntime/core/session/onnxruntime_cxx_api.h"
+#include "onnxruntime/core/session/onnxruntime_c_api.h"
 #include "status.h"
 
 namespace mlperf_bench {
@@ -31,7 +32,6 @@ class Backend {
     const Ort::RunOptions run_options_; //(nullptr);
     Ort::AllocatorInfo allocator_info_ =
         Ort::AllocatorInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
-    Ort::Allocator allocator_ = Ort::Allocator(nullptr).CreateDefault();
-
+    OrtAllocator* allocator_;
 };
 }

@@ -11,7 +11,9 @@ namespace mlperf_bench {
 
 Ort::Env env { ORT_LOGGING_LEVEL_WARNING, "mlperf_bench" };
 
-Backend::Backend() {}
+Backend::Backend() {
+    OrtGetAllocatorWithDefaultOptions(&allocator_);
+};
 
 Status Backend::LoadModel(std::string path, std::vector<std::string> outputs) {
 #ifdef _WIN32

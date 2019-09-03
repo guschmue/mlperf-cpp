@@ -40,10 +40,12 @@ void Dbg(Ort::Value& t) {
 }
 
 typedef void (*post_processor_t)(std::vector<Ort::Value> &,
-                                 std::vector<std::vector<uint8_t>> &);
+                                 std::vector<std::vector<uint8_t>> &,
+                                 const std::vector<mlperf::QuerySample> &);
 
 void PostProcess_Argmax(std::vector<Ort::Value> &val,
-                        std::vector<std::vector<uint8_t>> &buf) {
+    std::vector<std::vector<uint8_t>> &buf,
+    const std::vector<mlperf::QuerySample> &samples) {
     Ort::Value &r = val[0];
     auto type_info = r.GetTensorTypeAndShapeInfo();
     auto shape = type_info.GetShape();
@@ -56,7 +58,8 @@ void PostProcess_Argmax(std::vector<Ort::Value> &val,
 }
 
 void PostProcess_Softmax(std::vector<Ort::Value> &val,
-                         std::vector<std::vector<uint8_t>> &buf) {
+    std::vector<std::vector<uint8_t>> &buf,
+    const std::vector<mlperf::QuerySample> &samples) {
     Ort::Value &r = val[0];
     auto type_info = r.GetTensorTypeAndShapeInfo();
     auto shape = type_info.GetShape();
@@ -76,19 +79,30 @@ void PostProcess_Softmax(std::vector<Ort::Value> &val,
 }
 
 void PostProcess_TF_SSDMobilenet(std::vector<Ort::Value> &val,
-    std::vector<std::vector<uint8_t>> &buf) {
-    Ort::Value &num_detections = val[0];
-    Ort::Value &detection_boxes = val[1];
-    Ort::Value &detection_scores = val[2];
-    Ort::Value &detection_classes = val[3];
+    std::vector<std::vector<uint8_t>> &buf,
+    const std::vector<mlperf::QuerySample> &samples) {
+    Ort::Value &num_detections_val = val[0];
+    float* detection_boxes = val[1].GetTensorMutableData<float>();
+    float* detection_scores = val[2].GetTensorMutableData<float>();
+    float* detection_classes = val[3].GetTensorMutableData<float>();
 
-    auto type_info = num_detections.GetTensorTypeAndShapeInfo();
+    auto type_info = num_detections_val.GetTensorTypeAndShapeInfo();
     auto shape = type_info.GetShape();
-    float *p = num_detections.GetTensorMutableData<float>();
+    float *num_detections = num_detections_val.GetTensorMutableData<float>();
 
     for (int batch = 0; batch < shape[0]; batch++) {
-        float result = 0;
-        std::vector<uint8_t> ele((uint8_t *)&result, (uint8_t *)(&result + 1));
+        std::vector<uint8_t> ele(int(num_detections[batch])*7*sizeof(float));
+        float* result = (float*)ele.data();
+        for (int detection = 0; detection < int(num_detections[batch]); detection++) {
+            result[0] = float(samples[batch].index);
+            result[1] = detection_boxes[4* detection + 0];
+            result[2] = detection_boxes[4 * detection + 1];
+            result[3] = detection_boxes[4 * detection + 2];
+            result[4] = detection_boxes[4 * detection + 3];
+            result[5] = detection_scores[detection];
+            result[6] = float(detection_classes[detection]);
+            result += 7;
+        }
         buf.push_back(ele);
     }
 }
@@ -292,7 +306,7 @@ class SystemUnderTest : public mlperf::SystemUnderTest {
 
             size_t idx = 0;
             for (auto &s : samples) {
-                Ort::Value& r = qsl_->GetItem(samples[0].index);
+                Ort::Value& r = qsl_->GetItem(s.index);
                 T *p = r.GetTensorMutableData<T>();
                 for (size_t i = 0; i < elements; i++) {
                     data[idx++] = *p++;
@@ -303,7 +317,7 @@ class SystemUnderTest : public mlperf::SystemUnderTest {
         }
 
         std::vector<std::vector<uint8_t>> buf;
-        post_proc_(results, buf);
+        post_proc_(results, buf, samples);
         size_t idx = 0;
         for (auto &b : buf) {
             // hold a reference so the buffer doesn't get released before
