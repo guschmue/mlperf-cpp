@@ -496,16 +496,6 @@ std::map<std::string, std::map<std::string, std::string>> profiles = {
     {"resnet50",
      {
          {"dataset", "imagenet"},
-         {"queries-single", "1024"},
-         {"queries-multi", "24576"},
-         {"queries-server", "270336"},
-         {"queries-offline", "1"},
-         {"time-single", "60"},
-         {"time-multi", "60"},
-         {"time-server", "60"},
-         {"time-offline", "60"},
-         {"max-latency", "0.015"},
-         {"qps", "10"},
          {"backend", "onnxruntime"},
          {"inputs", "input_tensor:0"},
          {"outputs", "ArgMax:0"},
@@ -514,16 +504,6 @@ std::map<std::string, std::map<std::string, std::string>> profiles = {
     {"mobilenet",
      {
          {"dataset", "imagenet_mobilenet"},
-         {"queries-single", "1024"},
-         {"queries-multi", "24576"},
-         {"queries-server", "270336"},
-         {"queries-offline", "1"},
-         {"time-single", "60"},
-         {"time-multi", "60"},
-         {"time-server", "60"},
-         {"time-offline", "60"},
-         {"max-latency", "0.010"},
-         {"qps", "10"},
          {"backend", "onnxruntime"},
          {"inputs", "input:0"},
          {"outputs", "MobilenetV1/Predictions/Reshape_1:0"},
@@ -532,16 +512,6 @@ std::map<std::string, std::map<std::string, std::string>> profiles = {
     {"ssd-mobilenet",
      {
          {"dataset", "coco-300"},
-         {"queries-single", "1024"},
-         {"queries-multi", "24576"},
-         {"queries-server", "270336"},
-         {"queries-offline", "1"},
-         {"time-single", "60"},
-         {"time-multi", "60"},
-         {"time-server", "60"},
-         {"time-offline", "60"},
-         {"max-latency", "0.010"},
-         {"qps", "10"},
          {"backend", "onnxruntime"},
          {"inputs", "image_tensor:0"},
          {"outputs", "num_detections:0,detection_boxes:0,detection_scores:0,detection_classes:0"},
@@ -552,8 +522,6 @@ std::map<std::string, std::map<std::string, std::string>> profiles = {
 std::map<std::string, mlperf::TestScenario> scenario_map = {
     {"SingleStream", mlperf::TestScenario::SingleStream},
     {"MultiStream", mlperf::TestScenario::MultiStream},
-    {"Single", mlperf::TestScenario::SingleStream},
-    {"Multi", mlperf::TestScenario::MultiStream},
     {"Server", mlperf::TestScenario::Server},
     {"Offline", mlperf::TestScenario::Offline},
 };
@@ -569,7 +537,9 @@ int main(int argc, char *argv[]) {
     options.add_options()
         ("model", "model to load", 
             cxxopts::value<std::string>()->default_value(""))
-        ("scenario", "scenario to load (SingleStream,MultiStream,Server,Offline)", 
+        ("config", "mlperf rules config file",
+            cxxopts::value<std::string>()->default_value("mlperf.conf"))
+        ("scenario", "scenario to load (SingleStream,MultiStream,Server,Offline)",
             cxxopts::value<std::string>()->default_value("SingleStream"))
         ("mode", "mode (PerformanceOnly,AccuracyOnly,SubmissionRun)",
             cxxopts::value<std::string>()->default_value("PerformanceOnly"))
@@ -618,11 +588,14 @@ int main(int argc, char *argv[]) {
             std::cout << "invalid profile" << std::endl;
             exit(1);
         }
-
+        std::string scenario = result["scenario"].as<std::string>();
         mlperf::TestSettings settings;
-        settings.scenario = scenario_map[result["scenario"].as<std::string>()];
+        if (settings.FromConfig(result["config"].as<std::string>(), result["profile"].as<std::string>(), scenario)) {
+            std::cout << "issue with config " << result["config"].as<std::string>() << std::endl;
+            exit(1);
+        }
+        settings.scenario = scenario_map[scenario];
         settings.mode = mode_map[result["mode"].as<std::string>()];
-        settings.server_target_qps = 2000000;
 
         int entries_to_read = 0;
         int count = result["count"].as<int32_t>();
@@ -632,30 +605,15 @@ int main(int argc, char *argv[]) {
                 entries_to_read = 500;
             }
         }
-        if (settings.scenario == mlperf::TestScenario::SingleStream) {
-            settings.min_query_count = std::stoi(profile["queries-single"]);
-            settings.min_duration_ms = std::stoi(profile["time-single"]) * 1000;
-        }
         if (settings.scenario == mlperf::TestScenario::MultiStream) {
-            settings.min_query_count = std::stoi(profile["queries-multi"]);
-            settings.min_duration_ms = std::stoi(profile["time-multi"]) * 1000;
             settings.multi_stream_samples_per_query =
                 result["samples-perf-query"].as<int32_t>();
         }
         if (settings.scenario == mlperf::TestScenario::Server) {
-            settings.min_query_count = std::stoi(profile["queries-server"]);
-            settings.min_duration_ms = std::stoi(profile["time-server"]) * 1000;
             settings.server_target_qps = result["qps"].as<int32_t>();
             settings.server_target_latency_ns =
                 result["latency"].as<int32_t>() * 1000 * 1000;
         }
-        if (settings.scenario == mlperf::TestScenario::Offline) {
-            settings.min_query_count = std::stoi(profile["queries-offline"]);
-            settings.min_duration_ms =
-                std::stoi(profile["time-offline"]) * 1000;
-        }
-        settings.max_query_count = settings.min_query_count;
-        // settings.max_duration_ms = settings.min_duration_ms;
         if (count > 0) {
             entries_to_read = count;
             settings.min_query_count = count * 5;
