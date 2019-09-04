@@ -50,6 +50,7 @@ file(GLOB ORT_LIBS
   "${ORT_LIB}/libonnxruntime.*"  
 )
 file(COPY ${ORT_LIBS} DESTINATION  ${CMAKE_CURRENT_BINARY_DIR})
+file(COPY ../../../v0.5/mlperf.conf DESTINATION  ${CMAKE_CURRENT_BINARY_DIR})
 
 find_package(Threads)
 
@@ -69,12 +70,8 @@ endif()
 find_package(PythonInterp 3.5 REQUIRED)
 find_package(PythonLibs 3.5 REQUIRED)
 
-# add_subdirectory(${PROJECT_SOURCE_DIR}/external/onnx/third_party/benchmark EXCLUDE_FROM_ALL)
-
 # External dependencies
 list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/external)
-
-#add_subdirectory(${PROJECT_SOURCE_DIR}/../../loadgen EXCLUDE_FROM_ALL)
 
 get_filename_component(ROOT "${ROOT}" ABSOLUTE)
 get_filename_component(REPO_ROOT "${REPO_ROOT}" ABSOLUTE)
