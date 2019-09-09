@@ -1,10 +1,15 @@
+// Copyright(c) Microsoft Corporation.All rights reserved.
+// Licensed under the MIT license.
+
+//
+// A C++ implementation for mlperf inference benchmarks using onnxruntime
+//
+
 #include <chrono>
-#include <chrono>
+#include <exception>
 #include <fstream>
 #include <functional>
 #include <future>
-#include <iostream>
-#include <iostream>
 #include <iostream>
 #include <map>
 #include <mutex>
@@ -14,18 +19,36 @@
 #include <vector>
 #include <experimental/filesystem>
 namespace fs = std::experimental::filesystem;
-#include "cxxopts.hpp"
 
-#include "backend.h"
-#include "loadgen.h"
-#include "mlperf_bench.h"
-#include "npy.h"
+// loadgen includes
 #include "query_sample_library.h"
 #include "system_under_test.h"
 #include "test_settings.h"
 
+// local includes
+#include "cxxopts.hpp"
+#include "backend.h"
+#include "loadgen.h"
+#include "mlperf_bench.h"
+#include "npy.h"
+
+
 namespace mlperf_bench {
 
+class Exception : public std::exception {
+public:
+    Exception(std::string err) {
+        err_ = err;
+    }
+    virtual const char* what() const throw() { return err_.c_str();  }
+
+private:
+    std::string err_;
+};
+
+//
+// Dump tensors for debugging
+//
 void Dbg(Ort::Value& t) {
     auto type_info = t.GetTensorTypeAndShapeInfo();
     auto shape = type_info.GetShape();
@@ -39,10 +62,16 @@ void Dbg(Ort::Value& t) {
     std::cout << "\n";
 }
 
+//
+// function prototype for post processors
+//
 typedef void (*post_processor_t)(std::vector<Ort::Value> &,
                                  std::vector<std::vector<uint8_t>> &,
                                  const std::vector<mlperf::QuerySample> &);
 
+//
+// Argmax Post processor
+//
 void PostProcess_Argmax(std::vector<Ort::Value> &val,
     std::vector<std::vector<uint8_t>> &buf,
     const std::vector<mlperf::QuerySample> &samples) {
@@ -57,6 +86,9 @@ void PostProcess_Argmax(std::vector<Ort::Value> &val,
     }
 }
 
+//
+// Common Post processor (model ran Argmax)
+//
 void PostProcess_Softmax(std::vector<Ort::Value> &val,
     std::vector<std::vector<uint8_t>> &buf,
     const std::vector<mlperf::QuerySample> &samples) {
@@ -78,6 +110,10 @@ void PostProcess_Softmax(std::vector<Ort::Value> &val,
     }
 }
 
+
+//
+// Post processor for tensorflow object detection models
+//
 void PostProcess_TF_SSDMobilenet(std::vector<Ort::Value> &val,
     std::vector<std::vector<uint8_t>> &buf,
     const std::vector<mlperf::QuerySample> &samples) {
@@ -107,6 +143,10 @@ void PostProcess_TF_SSDMobilenet(std::vector<Ort::Value> &val,
     }
 }
 
+
+//
+// map string to post processor
+//
 std::map<std::string, post_processor_t> post_processors = {
     {"ArgMax", PostProcess_Argmax}, 
     {"SoftMax", PostProcess_Softmax},
@@ -114,11 +154,18 @@ std::map<std::string, post_processor_t> post_processors = {
 };
 
 
+//
+// our flavor of QuerySampleLibrary that lets us request a item by index 
+//
 class QuerySampleLibrary : public mlperf::QuerySampleLibrary {
    public:
     virtual Ort::Value& GetItem(size_t idx) = 0;
 };
 
+
+//
+// implementation of QuerySampleLibrary for real data
+//
 template <class T>
 class Qsl : public QuerySampleLibrary {
    public:
@@ -163,9 +210,14 @@ class Qsl : public QuerySampleLibrary {
                 if (count > 0 && files_.size() > count) break;
             }
         }
-        //std::sort(files_.begin(), files_.end());
-#endif
+        std::sort(files_.begin(), files_.end());
+#else
+        // we use this version to guarante order since the QSL index need be the index
+        // into the file list so accuracy can be calculated.
         std::ifstream infile(path);
+        if (!infile.is_open()) {
+            throw Exception("no validation file list found");
+        }
         std::string line;
         std::string basepath = path.substr(0, path.find_last_of("/\\"));
         while (std::getline(infile, line)) {
@@ -173,6 +225,7 @@ class Qsl : public QuerySampleLibrary {
             files_.push_back(basepath + "/" + file_name);
             if (count > 0 && files_.size() > count) break;
         }
+#endif
         return 0;
     }
 
@@ -197,6 +250,9 @@ class Qsl : public QuerySampleLibrary {
     Backend *be_;
 };
 
+//
+// implementation of QuerySampleLibrary for fake data
+//
 template <class T>
 class FakeQsl : public QuerySampleLibrary {
    public:
@@ -215,7 +271,7 @@ class FakeQsl : public QuerySampleLibrary {
             shape = { 1, 3, 1200, 1200 };
         }
         else {
-            // FIXME
+            throw Exception("unknown dataset type");
         }
         size_ = 1;
         shape_ = shape;
@@ -253,6 +309,9 @@ class FakeQsl : public QuerySampleLibrary {
     Backend *be_;
 };
 
+//
+// SystemUnderTest single threaded implementation
+//
 class SystemUnderTest : public mlperf::SystemUnderTest {
    public:
     SystemUnderTest(QuerySampleLibrary *qsl, Backend *be,
@@ -283,14 +342,14 @@ class SystemUnderTest : public mlperf::SystemUnderTest {
 
         std::vector<Ort::Value> results;
         if (samples.size() == 1) {
+            // we have 1 query to run
             Ort::Value& q = qsl_->GetItem(samples[0].index);
             results = be_->Run(&q, 1);
         }
         else {
             // FIXME: this is not very efficient. 
-            // loadgen will make the samples continues in the near future and once it does so
-            // change this code to just point into the continues data buffer. Needs changes how
-            // we load the tensors as well.
+            // loadgen will make the samples continues in the near future and once it does
+            // change this code to just point into the continues data buffer.
             Ort::Value& qq = qsl_->GetItem(samples[0].index);
             std::vector<int64_t> shapes;
             auto type_info = qq.GetTensorTypeAndShapeInfo();
@@ -303,14 +362,13 @@ class SystemUnderTest : public mlperf::SystemUnderTest {
                 shapes.push_back(si);
             }
             std::vector<T> data(size);
-
             size_t idx = 0;
+            T *dst = data.data();
             for (auto &s : samples) {
                 Ort::Value& r = qsl_->GetItem(s.index);
-                T *p = r.GetTensorMutableData<T>();
-                for (size_t i = 0; i < elements; i++) {
-                    data[idx++] = *p++;
-                }
+                T *src = r.GetTensorMutableData<T>();
+                ::memcpy(dst, src, sizeof(T) * elements);
+                dst += elements;
             }
             Ort::Value q = be_->GetTensor<T>(shapes, data);
             results = be_->Run(&q, 1);
@@ -348,7 +406,7 @@ class SystemUnderTest : public mlperf::SystemUnderTest {
 };
 
 //
-// Sut with thread pool
+// SystemUnderTest multi threaded implementation
 //
 class SystemUnderTestPool : public SystemUnderTest {
    public:
@@ -382,8 +440,8 @@ class SystemUnderTestPool : public SystemUnderTest {
 
    protected:
     void WorkerThread() {
-        std::vector<mlperf::QuerySample> my_samples;
-        my_samples.reserve(kReserveSampleSize);
+        std::vector<mlperf::QuerySample> samples;
+        samples.reserve(kReserveSampleSize);
         std::unique_lock<std::mutex> lock(mutex_);
         while (keep_workers_alive_) {
             next_poll_time_ += poll_period_;
@@ -392,25 +450,25 @@ class SystemUnderTestPool : public SystemUnderTest {
                            [&]() { return !keep_workers_alive_; });
             if (samples_.size() <= max_batchsize_) {
                 // if we can fit in one batch, take all
-                my_samples.swap(samples_);
+                samples.swap(samples_);
             } else {
                 // take only as much as fits into one batch
                 auto it = std::next(samples_.begin(), max_batchsize_);
-                std::move(samples_.begin(), it, std::back_inserter(my_samples));
+                std::move(samples_.begin(), it, std::back_inserter(samples));
                 samples_.erase(samples_.begin(), it);
             }
             lock.unlock();
 
-            if (my_samples.size() > 0) {
+            if (samples.size() > 0) {
                 if (input_type_ == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
-                    IssueQueryProc<float>(my_samples);
+                    IssueQueryProc<float>(samples);
                 }
                 else if (input_type_ == ONNX_TENSOR_ELEMENT_DATA_TYPE_UINT8) {
-                    IssueQueryProc<uint8_t>(my_samples);
+                    IssueQueryProc<uint8_t>(samples);
                 }
             }
             lock.lock();
-            my_samples.clear();
+            samples.clear();
         }
     }
 
@@ -426,11 +484,16 @@ class SystemUnderTestPool : public SystemUnderTest {
     std::vector<mlperf::QuerySample> samples_;
 };
 
+//
+// setup and start loadgen
+//
 void run(std::string model, std::string datadir,
          std::map<std::string, std::string> profile,
          mlperf::TestSettings &settings, int count, int threads, int max_batchsize,
          int ort_seq, int ort_threads) {
     Backend be;
+
+    // setup backend options
     be.GetOpt().SetGraphOptimizationLevel(ORT_ENABLE_ALL);
     if (ort_seq == 1) {
         be.GetOpt().EnableSequentialExecution();
@@ -450,6 +513,7 @@ void run(std::string model, std::string datadir,
 
     QuerySampleLibrary *qsl = NULL;
     if (!datadir.empty()) {
+        // use Fake data Qsl
         if (input_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
             qsl = new Qsl<float>(&be, datadir, count);
         }
@@ -457,7 +521,7 @@ void run(std::string model, std::string datadir,
             qsl = new Qsl<uint8_t>(&be, datadir, count);
         }
         else {
-            // FIXME
+            throw Exception("unsupported input_type");
         }
     } else {
         if (input_type == ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT) {
@@ -467,6 +531,7 @@ void run(std::string model, std::string datadir,
             qsl = new FakeQsl<uint8_t>(&be, profile["dataset"]);
         }
         else {
+            throw Exception("unknown input_type");
             // FIXME
         }
     }
@@ -492,6 +557,9 @@ void run(std::string model, std::string datadir,
     }
 }
 
+//
+// model specific parameters, like inputs, outputs ...
+//
 std::map<std::string, std::map<std::string, std::string>> profiles = {
     {"resnet50",
      {
@@ -517,8 +585,20 @@ std::map<std::string, std::map<std::string, std::string>> profiles = {
          {"outputs", "num_detections:0,detection_boxes:0,detection_scores:0,detection_classes:0"},
          {"post_process", "TF_SSDMobilenet"},
      }},
+    {"ssd-resnet34",
+     {
+         {"dataset", "coco-1200"},
+         {"backend", "onnxruntime"},
+         {"inputs", "image"},
+         {"outputs", "bboxes,labels,scores"},
+         {"post_process", "SSDResnet34"},
+     }},
 };
 
+
+//
+// mapping string -> scenario
+//
 std::map<std::string, mlperf::TestScenario> scenario_map = {
     {"SingleStream", mlperf::TestScenario::SingleStream},
     {"MultiStream", mlperf::TestScenario::MultiStream},
@@ -526,11 +606,15 @@ std::map<std::string, mlperf::TestScenario> scenario_map = {
     {"Offline", mlperf::TestScenario::Offline},
 };
 
+//
+// mapping string -> mode
+//
 std::map<std::string, mlperf::TestMode> mode_map = {
     {"SubmissionRun", mlperf::TestMode::SubmissionRun},
     {"AccuracyOnly", mlperf::TestMode::AccuracyOnly},
     {"PerformanceOnly", mlperf::TestMode::PerformanceOnly},
 };
+
 
 int main(int argc, char *argv[]) {
     cxxopts::Options options("mlperf_bench", "mlperf_bench");
@@ -543,8 +627,9 @@ int main(int argc, char *argv[]) {
             cxxopts::value<std::string>()->default_value("SingleStream"))
         ("mode", "mode (PerformanceOnly,AccuracyOnly,SubmissionRun)",
             cxxopts::value<std::string>()->default_value("PerformanceOnly"))
-        ("datadir", "data file to load",
+        ("data", "data file to load",
             cxxopts::value<std::string>()->default_value(""))
+        ("fake", "use fake data")
         ("profile", "profile to load",
             cxxopts::value<std::string>()->default_value("resnet50"))
         ("time", "time to run", 
@@ -571,19 +656,22 @@ int main(int argc, char *argv[]) {
         auto result = options.parse(argc, argv);
 
         if (result.count("help")) {
-            std::cout << options.help({"", "Group"}) << std::endl;
+            std::cout << options.help({ "", "Group" }) << std::endl;
             exit(0);
         }
         if (result.count("model") == 0) {
             std::cout << "specify model with --model path" << std::endl;
-            exit(0);
+            exit(1);
         }
-        if (result.count("datadir") == 0) {
-            std::cout << "no datadir given - using fake data" << std::endl;
+        if (result.count("data") == 0) {
+            std::cout << "no data file given - using fake data" << std::endl;
         }
-
-        std::map<std::string, std::string> profile =
-            profiles[result["profile"].as<std::string>()];
+        std::string data = result["data"].as<std::string>();
+        if (result.count("fake") != 0) {
+            std::cout << "using fake data" << std::endl;
+            data.empty();
+        }
+        std::map<std::string, std::string> profile = profiles[result["profile"].as<std::string>()];
         if (profile.empty()) {
             std::cout << "invalid profile" << std::endl;
             exit(1);
@@ -629,14 +717,17 @@ int main(int argc, char *argv[]) {
         int ort_threads = result["ort-threads"].as<int32_t>();
 
         run(result["model"].as<std::string>(),
-            result["datadir"].as<std::string>(), profile, settings,
+            data, profile, settings,
             entries_to_read, result["threads"].as<int32_t>(),
             result["max-batchsize"].as<int32_t>(),
             ort_seq, ort_threads);
     } catch (const cxxopts::OptionException &e) {
-        std::cout << "error parsing options: " << e.what() << std::endl;
+        std::cout << "argument error: " << e.what() << std::endl;
         exit(1);
-    }
+    } catch (const std::exception &e) {
+        std::cout << "error: " << e.what() << std::endl;
+        exit(1);
+    };
 
     return 0;
 }
