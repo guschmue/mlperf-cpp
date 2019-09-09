@@ -31,6 +31,9 @@ cmake .. -DORT_ROOT=$HOME/onnxruntime -DORT_LIB=$HOME/onnxruntime/build/Linux/Re
 ```
 For windows:
 ```
+cd mlperf-cpp
+mkdir build
+cd build
 cmake ..  -A x64 -G "Visual Studio 15 2017" -DCMAKE_BUILD_TYPE=RelWithDebInfo -DORT_ROOT=c:/src/onnxruntime  -DORT_LIB=c:/src/onnxruntime/build/Windows/RelWithDebInfo/RelWithDebInfo
 ```
 
