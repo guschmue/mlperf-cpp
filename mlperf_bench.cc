@@ -613,6 +613,7 @@ std::map<std::string, mlperf::TestMode> mode_map = {
     {"SubmissionRun", mlperf::TestMode::SubmissionRun},
     {"AccuracyOnly", mlperf::TestMode::AccuracyOnly},
     {"PerformanceOnly", mlperf::TestMode::PerformanceOnly},
+    {"FindPeakPerformance", mlperf::TestMode::FindPeakPerformance},
 };
 
 
@@ -625,7 +626,7 @@ int main(int argc, char *argv[]) {
             cxxopts::value<std::string>()->default_value("mlperf.conf"))
         ("scenario", "scenario to load (SingleStream,MultiStream,Server,Offline)",
             cxxopts::value<std::string>()->default_value("SingleStream"))
-        ("mode", "mode (PerformanceOnly,AccuracyOnly,SubmissionRun)",
+        ("mode", "mode (PerformanceOnly,AccuracyOnly,FindPeakPerformance)",
             cxxopts::value<std::string>()->default_value("PerformanceOnly"))
         ("data", "data file to load",
             cxxopts::value<std::string>()->default_value(""))
@@ -641,7 +642,7 @@ int main(int argc, char *argv[]) {
         ("qps", "qps", 
             cxxopts::value<int32_t>()->default_value("20"))
         ("latency", "latency (ms)",
-            cxxopts::value<int32_t>()->default_value("15"))
+            cxxopts::value<int32_t>()->default_value("10"))
         ("samples-perf-query", "samples-per-query",
             cxxopts::value<int32_t>()->default_value("2"))
         ("count", "count", 
@@ -694,13 +695,17 @@ int main(int argc, char *argv[]) {
             }
         }
         if (settings.scenario == mlperf::TestScenario::MultiStream) {
-            settings.multi_stream_samples_per_query =
-                result["samples-perf-query"].as<int32_t>();
+            if (result.count("samples-perf-query")) {
+                settings.multi_stream_samples_per_query =
+                    result["samples-perf-query"].as<int32_t>();
+            }
         }
         if (settings.scenario == mlperf::TestScenario::Server) {
             settings.server_target_qps = result["qps"].as<int32_t>();
-            settings.server_target_latency_ns =
-                result["latency"].as<int32_t>() * 1000 * 1000;
+            if (result.count("latency")) {
+                settings.server_target_latency_ns =
+                    result["latency"].as<int32_t>() * 1000 * 1000;
+            }
         }
         if (count > 0) {
             entries_to_read = count;
