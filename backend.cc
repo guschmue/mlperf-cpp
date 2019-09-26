@@ -7,12 +7,14 @@
 #include "backend.h"
 #include "status.h"
 
+const OrtApi* Ort::g_api = OrtGetApi(ORT_API_VERSION);
+
 namespace mlperf_bench {
 
 Ort::Env env { ORT_LOGGING_LEVEL_WARNING, "mlperf_bench" };
 
 Backend::Backend() {
-    OrtGetAllocatorWithDefaultOptions(&allocator_);
+    allocator_ = allocator_info_;
 };
 
 Status Backend::LoadModel(std::string path, std::vector<std::string> outputs) {

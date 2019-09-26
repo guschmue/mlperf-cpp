@@ -490,7 +490,7 @@ class SystemUnderTestPool : public SystemUnderTest {
 void run(std::string model, std::string datadir,
          std::map<std::string, std::string> profile,
          mlperf::TestSettings &settings, int count, int threads, int max_batchsize,
-         int ort_seq, int ort_threads) {
+         int ort_seq, int ort_interop, int ort_intraop) {
     Backend be;
 
     // setup backend options
@@ -501,8 +501,11 @@ void run(std::string model, std::string datadir,
     if (ort_seq == 2) {
         be.GetOpt().DisableSequentialExecution();
     }
-    if (ort_threads > 0) {
-        be.GetOpt().SetThreadPoolSize(ort_threads);
+    if (ort_interop > 0) {
+        be.GetOpt().SetInterOpNumThreads(ort_interop);
+    }
+    if (ort_intraop > 0) {
+        be.GetOpt().SetIntraOpNumThreads(ort_intraop);
     }
     be.LoadModel(model, {});
 
@@ -649,7 +652,9 @@ int main(int argc, char *argv[]) {
             cxxopts::value<int32_t>()->default_value("0"))
         ("ort-seq", "onnxruntime use sequential executor",
             cxxopts::value<int32_t>()->default_value("0"))
-        ("ort-threads", "onnxruntime thread count",
+        ("ort-interop", "onnxruntime interop thread count",
+            cxxopts::value<int32_t>()->default_value("0"))
+        ("ort-intraop", "onnxruntime intraop thread count",
             cxxopts::value<int32_t>()->default_value("0"))
         ("help", "help");
 
@@ -719,13 +724,14 @@ int main(int argc, char *argv[]) {
         }
 
         int ort_seq = result["ort-seq"].as<int32_t>();
-        int ort_threads = result["ort-threads"].as<int32_t>();
+        int ort_interop = result["ort-interop"].as<int32_t>();
+        int ort_intraop = result["ort-intraop"].as<int32_t>();
 
         run(result["model"].as<std::string>(),
             data, profile, settings,
             entries_to_read, result["threads"].as<int32_t>(),
             result["max-batchsize"].as<int32_t>(),
-            ort_seq, ort_threads);
+            ort_seq, ort_interop, ort_intraop);
     } catch (const cxxopts::OptionException &e) {
         std::cout << "argument error: " << e.what() << std::endl;
         exit(1);
