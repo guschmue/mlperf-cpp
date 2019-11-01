@@ -32,5 +32,6 @@ class Backend {
     const Ort::RunOptions run_options_; //(nullptr);
     Ort::AllocatorWithDefaultOptions allocator_info_;
     OrtAllocator* allocator_;
+    Ort::Env env_{ ORT_LOGGING_LEVEL_WARNING, "mlperf_bench" };
 };
 }

@@ -7,11 +7,8 @@
 #include "backend.h"
 #include "status.h"
 
-const OrtApi* Ort::g_api = OrtGetApi(ORT_API_VERSION);
 
 namespace mlperf_bench {
-
-Ort::Env env { ORT_LOGGING_LEVEL_WARNING, "mlperf_bench" };
 
 Backend::Backend() {
     allocator_ = allocator_info_;
@@ -20,9 +17,9 @@ Backend::Backend() {
 Status Backend::LoadModel(std::string path, std::vector<std::string> outputs) {
 #ifdef _WIN32
     std::wstring widestr = std::wstring(path.begin(), path.end());
-    session_ = new Ort::Session(env, widestr.c_str(), opt_);
+    session_ = new Ort::Session(env_, widestr.c_str(), opt_);
 #else
-    session_ = new Ort::Session(env, path.c_str(), opt_);
+    session_ = new Ort::Session(env_, path.c_str(), opt_);
 #endif
     for (size_t i = 0; i < this->session_->GetInputCount(); i++) {
         input_names_.push_back(session_->GetInputName(i, allocator_));

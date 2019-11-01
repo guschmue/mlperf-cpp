@@ -495,12 +495,6 @@ void run(std::string model, std::string datadir,
 
     // setup backend options
     be.GetOpt().SetGraphOptimizationLevel(ORT_ENABLE_ALL);
-    if (ort_seq == 1) {
-        be.GetOpt().EnableSequentialExecution();
-    }
-    if (ort_seq == 2) {
-        be.GetOpt().DisableSequentialExecution();
-    }
     if (ort_interop > 0) {
         be.GetOpt().SetInterOpNumThreads(ort_interop);
     }
